@@ -1,0 +1,17 @@
+[package]
+name = "gray-achieve"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.91"
+license = "MIT"
+description = "Unlockable achievements from the tool/turn event stream, stored in ~/.gray/achievements.json."
+
+[[bin]]
+name = "gray-achieve"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+strip = true
