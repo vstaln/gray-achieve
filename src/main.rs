@@ -47,6 +47,7 @@ fn manifest() -> Value {
         "tools": [],
         "description": "gain unlockable achievements from tool use",
         "commands": ["/achievements"],
+        "command_descriptions": {"/achievements": "list unlocked and locked achievements"},
         "capabilities": ["host.say"],
     })
 }
