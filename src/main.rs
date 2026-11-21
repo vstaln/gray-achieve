@@ -29,14 +29,46 @@ struct Achievement {
 }
 
 const ACHIEVEMENTS: &[Achievement] = &[
-    Achievement { id: "first_tool", name: "First Contact", desc: "run a tool call" },
-    Achievement { id: "tool_10", name: "Toolchain Ten", desc: "10 tool calls" },
-    Achievement { id: "tool_100", name: "Centurion", desc: "100 tool calls" },
-    Achievement { id: "first_bash", name: "Shell Shocked", desc: "run a bash tool call" },
-    Achievement { id: "first_write", name: "Pen to Paper", desc: "write or edit a file" },
-    Achievement { id: "first_error_seen", name: "Red Text", desc: "see a tool call fail" },
-    Achievement { id: "night_owl", name: "Night Owl", desc: "end a turn between 00:00 and 06:00 local" },
-    Achievement { id: "marathon", name: "Marathon", desc: "a single turn over 100k tokens" },
+    Achievement {
+        id: "first_tool",
+        name: "First Contact",
+        desc: "run a tool call",
+    },
+    Achievement {
+        id: "tool_10",
+        name: "Toolchain Ten",
+        desc: "10 tool calls",
+    },
+    Achievement {
+        id: "tool_100",
+        name: "Centurion",
+        desc: "100 tool calls",
+    },
+    Achievement {
+        id: "first_bash",
+        name: "Shell Shocked",
+        desc: "run a bash tool call",
+    },
+    Achievement {
+        id: "first_write",
+        name: "Pen to Paper",
+        desc: "write or edit a file",
+    },
+    Achievement {
+        id: "first_error_seen",
+        name: "Red Text",
+        desc: "see a tool call fail",
+    },
+    Achievement {
+        id: "night_owl",
+        name: "Night Owl",
+        desc: "end a turn between 00:00 and 06:00 local",
+    },
+    Achievement {
+        id: "marathon",
+        name: "Marathon",
+        desc: "a single turn over 100k tokens",
+    },
 ];
 
 fn manifest() -> Value {
@@ -159,7 +191,11 @@ fn eval_event(params: &Value, state: &mut State) -> Vec<&'static str> {
             }
         }
         "post_tool" => {
-            if params.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
+            if params
+                .get("is_error")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
                 out.push("first_error_seen");
             }
         }
@@ -192,10 +228,19 @@ fn fmt_ts(ts: u64) -> String {
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
-    let (m, y) = if mp < 10 { (mp + 3, y) } else { (mp - 9, y + 1) };
+    let (m, y) = if mp < 10 {
+        (mp + 3, y)
+    } else {
+        (mp - 9, y + 1)
+    };
     let d = doy - (153 * mp + 2) / 5 + 1;
     let t = ts % 86_400;
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60)
+    format!(
+        "{y:04}-{m:02}-{d:02} {:02}:{:02}:{:02}Z",
+        t / 3600,
+        t / 60 % 60,
+        t % 60
+    )
 }
 
 // ---------- wire ----------
@@ -332,7 +377,12 @@ mod tests {
     }
 
     fn event(dir: &Path, upath: &Path, params: Value) -> Vec<Value> {
-        handle(&json!({ "method": "event/notify", "params": params }), dir, upath).0
+        handle(
+            &json!({ "method": "event/notify", "params": params }),
+            dir,
+            upath,
+        )
+        .0
     }
 
     #[test]
@@ -347,15 +397,24 @@ mod tests {
         let dir = tmpdir("first");
         let upath = dir.join("achievements.json");
         let s = json!({"id":"s"});
-        let f = event(&dir, &upath, json!({"type":"pre_tool","name":"bash","session":s}));
-        let ids: Vec<&str> = f.iter()
+        let f = event(
+            &dir,
+            &upath,
+            json!({"type":"pre_tool","name":"bash","session":s}),
+        );
+        let ids: Vec<&str> = f
+            .iter()
             .filter_map(|v| v["params"]["text"].as_str())
             .collect();
         // pre_tool with bash → first_tool + first_bash in one shot
         assert_eq!(ids.len(), 2);
         assert!(f.iter().all(|v| v["method"] == "host/say"));
         // second event: first_tool already unlocked, but state counter moved
-        let f = event(&dir, &upath, json!({"type":"pre_tool","name":"read","session":s}));
+        let f = event(
+            &dir,
+            &upath,
+            json!({"type":"pre_tool","name":"read","session":s}),
+        );
         assert!(f.is_empty());
         assert_eq!(load_state(&dir).tool_calls, 2);
         let unlocked = load_unlocked(&upath);
@@ -366,10 +425,13 @@ mod tests {
     fn error_and_counters() {
         let dir = tmpdir("err");
         let upath = dir.join("achievements.json");
-        let f = event(&dir, &upath, json!({"type":"post_tool","name":"x","is_error":true,"session":{}}));
+        let f = event(
+            &dir,
+            &upath,
+            json!({"type":"post_tool","name":"x","is_error":true,"session":{}}),
+        );
         assert_eq!(f.len(), 1);
-        let mut st = State::default();
-        st.tool_calls = 9;
+        let mut st = State { tool_calls: 9 };
         let got = eval_event(&json!({"type":"pre_tool","name":"x"}), &mut st);
         assert!(got.contains(&"tool_10"));
         st.tool_calls = 99;
@@ -380,15 +442,27 @@ mod tests {
     #[test]
     fn marathon_threshold() {
         let mut st = State::default();
-        assert!(eval_event(&json!({"type":"turn_end","usage":{"total":MARATHON_TOKENS + 1}}), &mut st)
-            .contains(&"marathon"));
+        assert!(
+            eval_event(
+                &json!({"type":"turn_end","usage":{"total":MARATHON_TOKENS + 1}}),
+                &mut st
+            )
+            .contains(&"marathon")
+        );
         let mut st = State::default();
-        assert!(!eval_event(&json!({"type":"turn_end","usage":{"total":50}}), &mut st)
-            .contains(&"marathon"));
+        assert!(
+            !eval_event(&json!({"type":"turn_end","usage":{"total":50}}), &mut st)
+                .contains(&"marathon")
+        );
         // input+output fallback
         let mut st = State::default();
-        assert!(eval_event(&json!({"type":"turn_end","usage":{"input":90000,"output":20000}}), &mut st)
-            .contains(&"marathon"));
+        assert!(
+            eval_event(
+                &json!({"type":"turn_end","usage":{"input":90000,"output":20000}}),
+                &mut st
+            )
+            .contains(&"marathon")
+        );
     }
 
     #[test]
