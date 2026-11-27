@@ -106,14 +106,17 @@ struct State {
     tool_calls: u64,
 }
 
-fn load_state(dir: &Path) -> State {
-    let v: Value = std::fs::read_to_string(dir.join("state.json"))
-        .ok()
-        .and_then(|c| serde_json::from_str(&c).ok())
-        .unwrap_or(Value::Null);
-    State {
+fn load_state(dir: &Path) -> Result<State, String> {
+    let path = dir.join("state.json");
+    let v: Value = match std::fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str(&text)
+            .map_err(|e| format!("could not parse {}: {e}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(e) => return Err(format!("could not read {}: {e}", path.display())),
+    };
+    Ok(State {
         tool_calls: v.get("tool_calls").and_then(Value::as_u64).unwrap_or(0),
-    }
+    })
 }
 
 fn save_state(dir: &Path, s: &State) {
@@ -124,12 +127,17 @@ fn save_state(dir: &Path, s: &State) {
     );
 }
 
-fn load_unlocked(path: &Path) -> Vec<Value> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|c| serde_json::from_str(&c).ok())
-        .and_then(|v: Value| v.as_array().cloned())
-        .unwrap_or_default()
+fn load_unlocked(path: &Path) -> Result<Vec<Value>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("could not read {}: {e}", path.display())),
+    };
+    let v: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("could not parse {}: {e}", path.display()))?;
+    v.as_array()
+        .cloned()
+        .ok_or_else(|| format!("{} does not hold a JSON array", path.display()))
 }
 
 fn save_unlocked(path: &Path, unlocked: &[Value]) {
@@ -253,9 +261,9 @@ fn say_frame(text: &str) -> Value {
 
 /// Process one `event/notify`: update counters, append fresh unlocks to
 /// `achievements.json`, and return a `host/say` frame per new unlock.
-fn on_event(params: &Value, dir: &Path, unlocked_path: &Path) -> Vec<Value> {
-    let mut state = load_state(dir);
-    let mut unlocked = load_unlocked(unlocked_path);
+fn on_event(params: &Value, dir: &Path, unlocked_path: &Path) -> Result<Vec<Value>, String> {
+    let mut state = load_state(dir)?;
+    let mut unlocked = load_unlocked(unlocked_path)?;
     let have: Vec<String> = unlocked
         .iter()
         .filter_map(|u| u.get("id").and_then(Value::as_str).map(str::to_string))
@@ -276,7 +284,7 @@ fn on_event(params: &Value, dir: &Path, unlocked_path: &Path) -> Vec<Value> {
     if !frames.is_empty() {
         save_unlocked(unlocked_path, &unlocked);
     }
-    frames
+    Ok(frames)
 }
 
 /// `/achievements` → unlocked list then locked list.
@@ -316,7 +324,13 @@ fn handle(req: &Value, dir: &Path, unlocked_path: &Path) -> (Vec<Value>, bool) {
     let params = req.get("params").cloned().unwrap_or(Value::Null);
     let Some(id) = id else {
         let frames = if method == "event/notify" {
-            on_event(&params, dir, unlocked_path)
+            match on_event(&params, dir, unlocked_path) {
+                Ok(frames) => frames,
+                Err(e) => {
+                    eprintln!("gray-achieve: {e}");
+                    vec![]
+                }
+            }
         } else {
             vec![]
         };
@@ -329,7 +343,13 @@ fn handle(req: &Value, dir: &Path, unlocked_path: &Path) -> (Vec<Value>, bool) {
     }
     let result = match method {
         "plugin/manifest" => manifest(),
-        "command/run" => json!({ "text": list(&load_unlocked(unlocked_path)) }),
+        "command/run" => {
+            let text = match load_unlocked(unlocked_path) {
+                Ok(unlocked) => list(&unlocked),
+                Err(e) => format!("achieve: {e}"),
+            };
+            json!({ "text": text })
+        }
         "plugin/shutdown" => return (vec![json!({ "id": id, "result": {} })], true),
         _ => {
             let error = json!({ "code": -32601, "message": "method not found" });
@@ -416,8 +436,8 @@ mod tests {
             json!({"type":"pre_tool","name":"read","session":s}),
         );
         assert!(f.is_empty());
-        assert_eq!(load_state(&dir).tool_calls, 2);
-        let unlocked = load_unlocked(&upath);
+        assert_eq!(load_state(&dir).unwrap().tool_calls, 2);
+        let unlocked = load_unlocked(&upath).unwrap();
         assert_eq!(unlocked.len(), 2);
     }
 
